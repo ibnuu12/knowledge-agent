@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\KnowledgeAgent.Domain\KnowledgeAgent.Domain.csproj" />
+  </ItemGroup>
+</Project>
