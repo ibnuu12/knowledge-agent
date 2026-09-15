@@ -6,7 +6,7 @@ namespace KnowledgeAgent.Application.Agents
 {
     public sealed record AgentMessage(
         Guid ProjectId,
-        string message)
+        string Message)
     {
 
     }

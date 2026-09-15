@@ -1,6 +1,7 @@
 using KnowledgeAgent.Application;
 using KnowledgeAgent.Application.Agents;
 using KnowledgeAgent.Domain;
+using System.Collections;
 using Xunit;
 
 namespace KnowledgeAgent.Application.Tests;
@@ -490,6 +491,228 @@ public sealed class ProjectServiceTests
             exception.Message);
     }
 
+    [Fact]
+    public void Compose_CurrentState_ReturnsDeterministicStateSummary()
+    {
+        var context = new AgentContext(
+            ProjectId: Guid.NewGuid(),
+            ProjectName: "Knowledge Agent",
+            Objective: "Validate orchestration.",
+            Requirements:
+            [
+                new AgentRequirementContext(
+                Guid.NewGuid(),
+                "Requirement A",
+                "PROPOSED"),
+
+            new AgentRequirementContext(
+                Guid.NewGuid(),
+                "Requirement B",
+                "ACCEPTED")
+            ],
+            Decisions:
+            [
+                new AgentDecisionContext(
+                Guid.NewGuid(),
+                "Persistence",
+                "PostgreSQL is the state store.",
+                "ACCEPTED",
+                "H2 validation.")
+            ],
+            Assumptions:
+            [
+                new AgentAssumptionContext(
+                Guid.NewGuid(),
+                "PostgreSQL is available.",
+                "MEDIUM",
+                false)
+            ],
+            Evidence:
+            [
+                new AgentEvidence(
+                "IProjectRepository",
+                "Project state was read from the project repository.")
+            ]);
+
+        var message = new AgentMessage(
+            context.ProjectId,
+            "What is the current state?");
+
+        var composer = new AgentResponseComposer();
+        var result = composer.Compose(message, context);
+
+        Assert.Equal(
+            "Project=Knowledge Agent; Requirements=2; Decisions=1; Assumptions=1.",
+            result.CurrentStateSummary);
+
+        Assert.Empty(result.ProposedActions);
+        Assert.False(result.RequiresAuthorization);
+        Assert.NotEmpty(result.Evidence);
+    }
+
+    [Fact]
+    public void Compose_SameInput_ProducesSameResult()
+    {
+        var composer = new AgentResponseComposer();
+        var context = CreateContext();
+
+        var message = new AgentMessage(
+            context.ProjectId,
+            "What is the current state?");
+
+        var first = composer.Compose(message, context);
+        var second = composer.Compose(message, context);
+
+        Assert.Equal(
+            first.Response,
+            second.Response);
+
+        Assert.Equal(
+            first.CurrentStateSummary,
+            second.CurrentStateSummary);
+
+        Assert.Equal(
+            first.Evidence,
+            second.Evidence);
+
+        Assert.Equal(
+            first.OpenQuestions,
+            second.OpenQuestions);
+
+        Assert.Equal(
+            first.ProposedActions,
+            second.ProposedActions);
+
+        Assert.Equal(
+            first.RequiresAuthorization,
+            second.RequiresAuthorization);
+    }
+
+    [Fact]
+    public void Compose_DoesNotMutateContext()
+    {
+        var context = CreateContext();
+
+        var originalRequirements = context.Requirements;
+        var originalDecisions = context.Decisions;
+        var originalAssumptions = context.Assumptions;
+
+        var composer = new AgentResponseComposer();
+        composer.Compose(
+            new AgentMessage(
+                context.ProjectId,
+                "What is the current state?"),
+            context);
+
+        Assert.Same(originalRequirements, context.Requirements);
+        Assert.Same(originalDecisions, context.Decisions);
+        Assert.Same(originalAssumptions, context.Assumptions);
+    }
+
+    [Fact]
+    public void Compose_RequirementsInquiry_ReturnsRequirements()
+    {
+        var composer = new AgentResponseComposer();
+        var context = CreateContext();
+
+        var result = composer.Compose(
+            new AgentMessage(
+                context.ProjectId,
+                "What are the requirements?"),
+            context);
+
+        Assert.Contains("Requirement A", result.Response);
+        Assert.Contains("Requirement B", result.Response);
+        Assert.Empty(result.OpenQuestions);
+        Assert.Empty(result.ProposedActions);
+        Assert.False(result.RequiresAuthorization);
+    }
+
+    [Fact]
+    public void Compose_AssumptionsInquiry_ReturnsAssumptions()
+    {
+        var composer = new AgentResponseComposer();
+        var context = CreateContext();
+
+        var result = composer.Compose(
+            new AgentMessage(
+                context.ProjectId,
+                "What assumptions exist?"),
+            context);
+
+        Assert.Contains(
+            "PostgreSQL is available.",
+            result.Response);
+
+        Assert.Contains(
+            "MEDIUM",
+            result.Response);
+
+        Assert.Contains(
+            "Validated=False",
+            result.Response);
+
+        Assert.Empty(result.OpenQuestions);
+        Assert.Empty(result.ProposedActions);
+        Assert.False(result.RequiresAuthorization);
+    }
+
+    [Fact]
+    public void Compose_UnknownInquiry_DoesNotInventInformation()
+    {
+        var composer = new AgentResponseComposer();
+        var context = CreateContext();
+
+        var result = composer.Compose(
+            new AgentMessage(
+                context.ProjectId,
+                "What is the deployment status?"),
+            context);
+
+        Assert.Empty(result.ProposedActions);
+        Assert.False(result.RequiresAuthorization);
+        Assert.NotEmpty(result.OpenQuestions);
+
+        Assert.DoesNotContain(
+            "deployment",
+            result.Response,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Compose_RequirementsInquiry_WithNoRequirements_ReturnsExplicitEmptyState()
+    {
+        var composer = new AgentResponseComposer();
+
+        var context = new AgentContext(
+            Guid.NewGuid(),
+            "Empty Project",
+            null,
+            [],
+            [],
+            [],
+            [
+                new AgentEvidence(
+                "IProjectRepository",
+                "Project state was read from the project repository.")
+            ]);
+
+        var result = composer.Compose(
+            new AgentMessage(
+                context.ProjectId,
+                "Show requirements"),
+            context);
+
+        Assert.Contains(
+            "No requirements",
+            result.Response);
+
+        Assert.Empty(result.OpenQuestions);
+        Assert.Empty(result.ProposedActions);
+        Assert.False(result.RequiresAuthorization);
+    }
+
+
     private sealed class FakeProjectRepository : IProjectRepository
     {
         private readonly Dictionary<Guid, Project> _projects = [];
@@ -548,5 +771,47 @@ public sealed class ProjectServiceTests
             return Task.CompletedTask;
         }
 
+    }
+    private static AgentContext CreateContext()
+    {
+        return new AgentContext(
+            ProjectId: Guid.NewGuid(),
+            ProjectName: "Knowledge Agent",
+            Objective: "Validate orchestration.",
+            Requirements:
+            [
+                new AgentRequirementContext(
+                Guid.NewGuid(),
+                "Requirement A",
+                "PROPOSED"),
+
+            new AgentRequirementContext(
+                Guid.NewGuid(),
+                "Requirement B",
+                "ACCEPTED")
+            ],
+            Decisions:
+            [
+                new AgentDecisionContext(
+                Guid.NewGuid(),
+                "Persistence",
+                "PostgreSQL is the state store.",
+                "ACCEPTED",
+                "H2 validation.")
+            ],
+            Assumptions:
+            [
+                new AgentAssumptionContext(
+                Guid.NewGuid(),
+                "PostgreSQL is available.",
+                "MEDIUM",
+                false)
+            ],
+            Evidence:
+            [
+                new AgentEvidence(
+                "IProjectRepository",
+                "Project state was read from the project repository.")
+            ]);
     }
 }

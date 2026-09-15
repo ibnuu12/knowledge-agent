@@ -16,6 +16,7 @@ builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<IAgentOrchestrator, AgentOrchestrator>();
 builder.Services.AddScoped<IAgentContextAssembler, AgentContextAssembler>();
 builder.Services.AddScoped<IAgentOrchestrator, AgentOrchestrator>();
+builder.Services.AddScoped<IAgentResponseComposer, AgentResponseComposer>();
 
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
